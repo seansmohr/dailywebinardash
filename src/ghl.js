@@ -54,19 +54,19 @@ export async function resolveCustomField(keyOrName) {
   return match || null;
 }
 
-// Search contacts created within [startISO, endISO], following pagination.
-// Returns an array of full contact objects (with customFields + tags).
-export async function searchContactsByDateAdded(startISO, endISO) {
+// Search contacts created within [startISO, endISO], optionally narrowed by
+// extra filters (e.g. a landing-page custom field). Uses searchAfter cursor
+// pagination (GHL's recommended, cap-free method). Returns full contact objects
+// (with customFields + tags).
+export async function searchContactsByDateAdded(startISO, endISO, extraFilters = []) {
   const all = [];
   const pageLimit = 100;
-  let page = 1;
-  // Hard stop to avoid runaway loops if the API misbehaves.
-  const maxPages = 500;
+  const maxPages = 1000; // hard stop against runaway loops
+  let searchAfter = null;
 
-  while (page <= maxPages) {
+  for (let i = 0; i < maxPages; i++) {
     const body = {
       locationId: config.ghl.locationId,
-      page,
       pageLimit,
       filters: [
         {
@@ -74,20 +74,29 @@ export async function searchContactsByDateAdded(startISO, endISO) {
           operator: "range",
           value: { gte: startISO, lte: endISO },
         },
+        ...extraFilters,
       ],
       sort: [{ field: "dateAdded", direction: "asc" }],
     };
+    if (searchAfter) body.searchAfter = searchAfter;
+
     const data = await ghlFetch(`/contacts/search`, {
       method: "POST",
       body: JSON.stringify(body),
     });
     const contacts = data.contacts || [];
     all.push(...contacts);
-    const total = data.total ?? data.meta?.total ?? all.length;
-    if (contacts.length < pageLimit || all.length >= total) break;
-    page += 1;
+    if (contacts.length < pageLimit) break;
+    // Cursor for the next page = searchAfter of the last returned contact.
+    searchAfter = contacts[contacts.length - 1]?.searchAfter;
+    if (!searchAfter) break;
   }
   return all;
+}
+
+// Build a GHL search filter for a custom-field exact match.
+export function customFieldFilter(fieldId, value) {
+  return { field: `customFields.${fieldId}`, operator: "eq", value };
 }
 
 // Fetch a single contact by id (used to resolve appointment owners not already

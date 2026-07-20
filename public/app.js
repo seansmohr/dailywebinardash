@@ -233,7 +233,7 @@ function render(data) {
     );
   }
   note.push(
-    `Contacts bucketed by created date; appointments by appointment date. "Other" (contacts with no landing-page value) is excluded from the two cards but visible in totals via the API.`
+    `Everything is cohorted by the contact's registration day. Attended/missed come from tags; a booking counts a distinct contact who scheduled on that calendar (cancelled appointments excluded). Recent days may show low attendance/bookings simply because those webinars/appointments haven't happened yet.`
   );
   document.getElementById("footnote").textContent = note.join(" ");
 }

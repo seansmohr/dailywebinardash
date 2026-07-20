@@ -17,64 +17,73 @@ landing page's contacts, show rate, and booking rate better than the control?
 
 ---
 
-## How it maps to your GHL data
+## How it maps to your GHL data (verified against the live account)
 
 | Metric | Source in GHL |
 | --- | --- |
-| Landing page | A **contact custom field** (`GHL_LP_FIELD_KEY`) whose value is `medicare101_landing_page_b` or `medicare101_landing_page_daily` |
-| Attended / Missed | **Tags** on the contact (`TAG_ATTENDED`, `TAG_MISSED`) |
-| Autobook appts | Events on the **autobook calendar** (`CALENDAR_AUTOBOOK_ID`) |
-| VA appts | Events on the **VA calendar** (`CALENDAR_VA_ID`) |
-| Day bucketing | Contacts by created date, appointments by appointment date, in `DASHBOARD_TZ` |
+| Landing page | Contact custom field **"Landing Page"** (`contact.landing_page`, id `fTDU51m5BZslEG63pdfN`) = `medicare101_landing_page_b` or `medicare101_landing_page_daily` |
+| Attended / Missed | Tags **`attended webinar`** / **`missed webinar`** on the contact |
+| Autobook appts | Bookings on the **"Turning 65 Medicare Call"** calendar (`jDfKPflpQai5OB0v7m0C`) |
+| VA appts | Bookings on the **"VA Calendar"** (`iDBM1sRSqiZBWhblcGPD`) |
 
-Nothing is hard-coded — every field key, tag, calendar, and label is an env var,
-so you can retune it without touching code.
+These are baked in as defaults, so the **only** variable you must set is
+`GHL_API_TOKEN`. Everything else is overridable via env vars (see `.env.example`)
+if the setup changes.
+
+### Cohort model (important)
+
+Every contact is cohorted by its **registration day** (`dateAdded`, in
+`DASHBOARD_TZ`). For each landing page, per day:
+
+- **Contacts** — registrations that day
+- **Attended / Missed** — of those contacts, how many later earned the tag
+- **Autobook / VA** — of those contacts, how many booked on that calendar
+  (distinct contacts; `cancelled` appointments excluded)
+
+Because it's a funnel by acquisition day, the **most recent days will show low
+attendance/bookings** — those webinars and appointments simply haven't happened
+yet. That's expected; look at days old enough for the funnel to complete.
 
 ---
 
 ## 1. Create a GHL Private Integration token
 
 1. In the GHL sub-account: **Settings → Private Integrations → Create**.
-2. Grant these scopes (read-only is enough):
+2. Grant these read-only scopes:
    - `View Contacts` (`contacts.readonly`)
    - `View Custom Fields` (`locations/customFields.readonly`)
+   - `View Calendars` (`calendars.readonly`)
    - `View Calendar Events` (`calendars/events.readonly`)
-3. Copy the token (starts with `pit-…`) into `GHL_API_TOKEN`.
-4. Find your **Location ID** (Settings → Business Profile, or the URL) → `GHL_LOCATION_ID`.
+3. Copy the token (starts with `pit-…`). That's the **only** value you must set.
 
-## 2. Find the field key, tags, and calendar IDs
+The field id, calendar ids, tag names, and location id are already baked in as
+verified defaults — override any of them via env var only if the setup changes.
 
-- **Custom field:** Settings → Custom Fields. Use the field name or key that
-  stores the landing page value. Set `GHL_LP_FIELD_KEY` to it (the app resolves
-  the field id for you at request time).
-- **Tags:** whatever your webinar automation applies for attended vs missed.
-- **Calendar IDs:** Calendars → each calendar's settings; the id is in the URL.
+## 2. (Optional) Re-discover config if the GHL setup changes
 
-## 2b. (Recommended) Auto-discover your config
-
-Instead of hunting for field keys, calendar IDs, and tag names by hand, run the
-discovery tool. With `GHL_API_TOKEN` + `GHL_LOCATION_ID` set, it inspects your
-account and prints a ready-to-paste env block:
+If you rename a tag, add a calendar, or change the landing-page field, run the
+discovery tool to get an updated, ready-to-paste env block:
 
 ```bash
 npm run discover
 ```
 
-It lists every custom field and calendar, samples the last 30 days of contacts
-to show which field actually holds the `medicare101_landing_page_*` values and
-which tags are in use, and suggests `GHL_LP_FIELD_KEY`, `CALENDAR_AUTOBOOK_ID`,
-and `CALENDAR_VA_ID`. It prints **no PII** — only field ids, value strings, tag
+It lists every custom field and calendar, samples recent contacts to show which
+field holds the `medicare101_landing_page_*` values and which tags are in use,
+and suggests the env vars. It prints **no PII** — only ids, value strings, tag
 names, and counts.
 
 ## 3. Deploy on Railway
 
-1. Push this repo to GitHub.
-2. In Railway: **New Project → Deploy from GitHub repo** → pick this repo.
-3. Add the environment variables from `.env.example` under the service's
-   **Variables** tab. Railway provides `PORT` automatically.
-4. Deploy. Railway uses `railway.json` (Nixpacks, `npm start`, health check at
+1. In Railway: **New Project → Deploy from GitHub repo** → pick this repo, and
+   set the deploy branch (or merge to `main` first).
+2. Under **Variables**, add `GHL_API_TOKEN` (and `DASHBOARD_PASSWORD` if you want
+   login protection — recommended, since the dashboard shows lead data). Railway
+   provides `PORT` automatically.
+3. Deploy. Railway uses `railway.json` (Nixpacks, `npm start`, health check at
    `/healthz`).
-5. Open the generated URL. Set `DASHBOARD_PASSWORD` first if you want it private.
+4. **Settings → Networking → Generate Domain**, then open the URL.
+5. Verify at `/healthz` — `missingEnv` should be `[]`.
 
 ## 4. Run locally
 
