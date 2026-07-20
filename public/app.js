@@ -70,7 +70,7 @@ async function load(refresh = false) {
     const m = data.meta;
     status.textContent =
       `Updated ${new Date(m.generatedAt).toLocaleString()} · ` +
-      `${m.contactsFetched} contacts, ${m.appointmentsFetched} appts · ` +
+      `${m.contactsFetched} contacts, ${m.appointmentsCounted} appts · ` +
       `tz ${m.timezone}${m.cached ? " · cached" : ""}`;
   } catch (err) {
     status.className = "status-bar err";
