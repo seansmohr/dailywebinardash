@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daily Webinar Split-Test Dashboard</title>
+    <meta name="description" content="Landing page split test: medicare101 B vs Daily — contacts, attendance, and appointments by landing page, per day." />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/vendor/chart.umd.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <div>
+          <h1>Daily Webinar Split-Test Dashboard</h1>
+          <p class="sub">
+            Medicare101 landing page test &mdash; contacts, webinar attendance, and
+            booked appointments by landing page. Live from GoHighLevel.
+          </p>
+        </div>
+      </header>
+
+      <div class="legend-key">
+        <span class="item"><span class="swatch" style="background:var(--control)"></span> <span id="key-control">Landing Page B (control)</span></span>
+        <span class="item"><span class="swatch" style="background:var(--test)"></span> <span id="key-test">Daily (test)</span></span>
+      </div>
+
+      <div class="controls">
+        <div class="field">
+          <label for="start">Start</label>
+          <input type="date" id="start" />
+        </div>
+        <div class="field">
+          <label for="end">End</label>
+          <input type="date" id="end" />
+        </div>
+        <div class="field">
+          <label>Quick range</label>
+          <div class="presets">
+            <button class="preset" data-days="7">7d</button>
+            <button class="preset" data-days="14">14d</button>
+            <button class="preset" data-days="30">30d</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="primary" id="apply">Apply</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="refresh" title="Force a fresh pull from GHL (bypass cache)">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="status-bar" id="status"></div>
+      <div id="warnings"></div>
+
+      <section class="cards" id="cards"></section>
+
+      <section class="chart-grid">
+        <div class="panel full">
+          <h3>Daily new contacts by landing page</h3>
+          <p class="hint">New registrations per day (bucketed by contact created date).</p>
+          <div class="canvas-box"><canvas id="chartContacts"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Webinar outcomes</h3>
+          <p class="hint">Attended vs missed totals, by landing page.</p>
+          <div class="canvas-box"><canvas id="chartAttendance"></canvas></div>
+        </div>
+        <div class="panel">
+          <h3>Booked appointments</h3>
+          <p class="hint">Autobook &amp; VA calendar bookings, by landing page.</p>
+          <div class="canvas-box"><canvas id="chartAppts"></canvas></div>
+        </div>
+      </section>
+
+      <section class="panel full">
+        <h3>Daily breakdown</h3>
+        <p class="hint">
+          B = Landing Page B (control), D = Daily (test). Att = attended, Miss = missed,
+          AB = autobook, VA = VA calendar.
+        </p>
+        <div class="table-box">
+          <table class="daily" id="daily"></table>
+        </div>
+      </section>
+
+      <p class="footer-note" id="footnote"></p>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
