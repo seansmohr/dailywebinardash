@@ -91,22 +91,57 @@ function renderWarnings(meta) {
     `</ul></div>`;
 }
 
+// Rates are computed against RESOLVED contacts (attended + missed) — i.e. those
+// whose webinar has already happened — so the two funnels compare fairly even
+// though Daily launched more recently and has many still-pending registrants.
+function ratesOf(t) {
+  const resolved = t.attended + t.missed;
+  const r = (n) => (resolved ? n / resolved : null);
+  return { resolved, show: r(t.attended), autobook: r(t.autobook), va: r(t.va) };
+}
+function pctv(x) {
+  return x == null ? "—" : Math.round(x * 1000) / 10 + "%";
+}
+// Percentage-point delta of test vs control, as a colored chip.
+function deltaChip(testVal, ctrlVal) {
+  if (testVal == null || ctrlVal == null) return "";
+  const dpp = (testVal - ctrlVal) * 100;
+  const sign = dpp >= 0 ? "+" : "";
+  const cls = dpp >= 0 ? "up" : "down";
+  return `<span class="delta ${cls}">${sign}${Math.round(dpp * 10) / 10}pp</span>`;
+}
+
 function renderCards(totals) {
   const cards = document.getElementById("cards");
+  const cr = ratesOf(totals.control);
+
   const build = (lp, cls) => {
     const t = totals[lp];
+    const r = ratesOf(t);
+    const isTest = lp === "test";
+    const rateRow = (label, val, cmp) => `
+      <div class="rate">
+        <div class="rv">${pctv(val)}${isTest ? deltaChip(val, cmp) : ""}</div>
+        <div class="rl">${label}</div>
+      </div>`;
     return `
       <div class="card ${cls}">
         <h2><span class="dot"></span>${escapeHtml(LABELS[lp])}</h2>
         <div class="value-code">${lp === "control" ? "medicare101_landing_page_b" : "medicare101_landing_page_daily"}</div>
         <div class="metrics">
           <div class="metric"><div class="n">${t.contacts}</div><div class="l">Contacts</div></div>
-          <div class="metric"><div class="n">${t.attended}</div><div class="l">Attended</div><div class="r">${pct(t.attended, t.contacts)} show</div></div>
-          <div class="metric"><div class="n">${t.missed}</div><div class="l">Missed</div><div class="r">${pct(t.missed, t.contacts)}</div></div>
+          <div class="metric"><div class="n">${t.attended}</div><div class="l">Attended</div></div>
+          <div class="metric"><div class="n">${t.missed}</div><div class="l">Missed</div></div>
           <div class="metric"><div class="n">${t.autobook}</div><div class="l">${escapeHtml(CAL.autobook)}</div></div>
           <div class="metric"><div class="n">${t.va}</div><div class="l">${escapeHtml(CAL.va)}</div></div>
-          <div class="metric"><div class="n">${t.autobook + t.va}</div><div class="l">Booked</div><div class="r">${pct(t.autobook + t.va, t.contacts)} of contacts</div></div>
+          <div class="metric"><div class="n">${t.autobook + t.va}</div><div class="l">Booked</div></div>
         </div>
+        <div class="rates">
+          ${rateRow("Show rate", r.show, cr.show)}
+          ${rateRow("Autobook rate", r.autobook, cr.autobook)}
+          ${rateRow("VA book rate", r.va, cr.va)}
+        </div>
+        <div class="rates-note">rates among ${r.resolved} resolved (attended + missed)</div>
       </div>`;
   };
   cards.innerHTML = build("control", "control") + build("test", "test");
@@ -233,7 +268,7 @@ function render(data) {
     );
   }
   note.push(
-    `Everything is cohorted by the contact's registration day. Attended/missed come from tags; a booking counts a distinct contact who scheduled on that calendar (cancelled appointments excluded). Recent days may show low attendance/bookings simply because those webinars/appointments haven't happened yet.`
+    `Everything is cohorted by the contact's registration day. Attended/missed come from tags; a booking counts a distinct contact who scheduled on that calendar (cancelled appointments excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts (attended + missed) — those whose webinar has already happened — so the two funnels compare fairly even though Daily launched more recently. Green/red chips on Daily show the percentage-point gap vs the control.`
   );
   document.getElementById("footnote").textContent = note.join(" ");
 }

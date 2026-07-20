@@ -131,6 +131,22 @@ button.preset.active { background: var(--control); border-color: var(--control);
 .metric .l { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
 .metric .r { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
+/* Decision rates strip */
+.card .rates {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.rate .rv { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.rate .rl { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+.rate .delta { font-size: 11px; font-weight: 650; padding: 1px 5px; border-radius: 5px; }
+.rate .delta.up { color: var(--good); background: rgba(12, 163, 12, 0.12); }
+.rate .delta.down { color: var(--critical); background: rgba(208, 59, 59, 0.12); }
+.card .rates-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
 /* Charts */
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 26px; }
 .panel {
