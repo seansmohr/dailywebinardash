@@ -102,6 +102,21 @@ export async function getContact(id) {
   }
 }
 
+// List all calendars in the location (id + name), for discovery/config.
+export async function listCalendars() {
+  const params = new URLSearchParams({ locationId: config.ghl.locationId });
+  const data = await ghlFetch(`/calendars/?${params.toString()}`);
+  return data.calendars || [];
+}
+
+// List all custom fields (id + fieldKey + name), for discovery/config.
+export async function listCustomFields() {
+  const data = await ghlFetch(
+    `/locations/${config.ghl.locationId}/customFields`
+  );
+  return data.customFields || data.customField || [];
+}
+
 // Fetch calendar events (appointments) for a calendar within a time window.
 // startMs/endMs are epoch milliseconds.
 export async function getCalendarEvents(calendarId, startMs, endMs) {

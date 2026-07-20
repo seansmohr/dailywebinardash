@@ -50,6 +50,22 @@ so you can retune it without touching code.
 - **Tags:** whatever your webinar automation applies for attended vs missed.
 - **Calendar IDs:** Calendars → each calendar's settings; the id is in the URL.
 
+## 2b. (Recommended) Auto-discover your config
+
+Instead of hunting for field keys, calendar IDs, and tag names by hand, run the
+discovery tool. With `GHL_API_TOKEN` + `GHL_LOCATION_ID` set, it inspects your
+account and prints a ready-to-paste env block:
+
+```bash
+npm run discover
+```
+
+It lists every custom field and calendar, samples the last 30 days of contacts
+to show which field actually holds the `medicare101_landing_page_*` values and
+which tags are in use, and suggests `GHL_LP_FIELD_KEY`, `CALENDAR_AUTOBOOK_ID`,
+and `CALENDAR_VA_ID`. It prints **no PII** — only field ids, value strings, tag
+names, and counts.
+
 ## 3. Deploy on Railway
 
 1. Push this repo to GitHub.
