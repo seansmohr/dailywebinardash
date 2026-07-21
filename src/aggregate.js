@@ -1,20 +1,19 @@
-// Aggregation logic for the landing-page split test.
+// Aggregation for the landing-page split test — EVENT-DAY model.
 //
-// Model: every contact is cohorted by the day it REGISTERED (dateAdded), in the
-// dashboard timezone. For each landing page, per registration day, we report:
-//   contacts  – new registrations
-//   attended  – contacts with an "attended webinar" tag
-//   missed    – contacts with a "missed webinar" tag
-//   autobook  – contacts who booked on the autobook (Turning 65) calendar
-//   va        – contacts who booked on the VA calendar
-// "Booked" counts DISTINCT CONTACTS who scheduled (cancelled/deleted excluded),
-// which matches "contacts who schedule an appointment".
+// Each metric is counted on the day it actually happened:
+//   contacts          – the day the contact registered (dateAdded)
+//   attended / missed  – the day the WEBINAR ran (webinar-date custom field)
+//   autobook / va      – the day the appointment was BOOKED (event.dateAdded)
+//
+// Because attendance and bookings happen days after signup, we pull contacts
+// from `lookbackDays` before the window so those in-window events are complete.
 import { config } from "./config.js";
 import {
   resolveCustomField,
   searchContactsByDateAdded,
   customFieldFilter,
   getCalendarEvents,
+  getContact,
 } from "./ghl.js";
 
 // ---- helpers ----
@@ -32,6 +31,7 @@ function toDate(input) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Day key for a precise timestamp (registration, booking), in the dashboard tz.
 function dayKey(input) {
   const d = toDate(input);
   if (!d) return null;
@@ -43,8 +43,28 @@ function dayKey(input) {
   }).format(d);
 }
 
+// Day key for a DATE-ONLY custom field (e.g. webinar date "2026-07-21T00:00:00Z").
+// These represent a calendar date stored at midnight UTC, so take the date part
+// verbatim — tz-converting would wrongly shift it to the previous day.
+function plainDateKey(value) {
+  const s = String(value ?? "").trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  return dayKey(s); // fallback for unexpected formats
+}
+
 function emptyBucket() {
   return { contacts: 0, attended: 0, missed: 0, autobook: 0, va: 0 };
+}
+
+function readField(contact, fieldId) {
+  if (!fieldId) return null;
+  const fields = contact.customFields || contact.custom_fields || [];
+  for (const f of fields) {
+    const fid = f.id || f.customFieldId || f.field;
+    if (fid && fid === fieldId) return f.value ?? f.field_value ?? f.fieldValue;
+  }
+  return null;
 }
 
 function attendanceOf(contact) {
@@ -53,15 +73,6 @@ function attendanceOf(contact) {
   const missedSet = config.tags.missed.map(norm);
   if (tags.some((t) => attendedSet.includes(t))) return "attended";
   if (tags.some((t) => missedSet.includes(t))) return "missed";
-  return null;
-}
-
-function lpValueOf(contact, fieldId) {
-  const fields = contact.customFields || contact.custom_fields || [];
-  for (const f of fields) {
-    const fid = f.id || f.customFieldId || f.field;
-    if (fid && fid === fieldId) return f.value ?? f.field_value ?? f.fieldValue;
-  }
   return null;
 }
 
@@ -93,19 +104,27 @@ function dayRange(startISO, endISO) {
 // ---- main ----
 
 export async function buildDashboard(startISO, endISO) {
-  // 1. Resolve the landing-page custom field id.
-  const field = await resolveCustomField(config.lpFieldKey);
-  const fieldId = field?.id || null;
+  const [lpField, webinarField] = await Promise.all([
+    resolveCustomField(config.lpFieldKey),
+    resolveCustomField(config.webinarDateFieldKey),
+  ]);
+  const fieldId = lpField?.id || null;
+  const webinarFieldId = webinarField?.id || null;
 
-  // 2. Fetch the two cohorts (registered in-window). If the field resolved, we
-  //    filter server-side per landing page; otherwise fetch all and classify.
-  let contacts = []; // { contact, lp }
+  // Widened fetch: pull contacts from lookbackDays before the window so that
+  // webinar-day attendance and booking attribution inside the window are complete.
+  const startDate = toDate(startISO);
+  const widenedStartISO = new Date(
+    startDate.getTime() - config.lookbackDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  let contacts = [];
   if (fieldId) {
     const [control, test] = await Promise.all([
-      searchContactsByDateAdded(startISO, endISO, [
+      searchContactsByDateAdded(widenedStartISO, endISO, [
         customFieldFilter(fieldId, config.landingPages.control.value),
       ]),
-      searchContactsByDateAdded(startISO, endISO, [
+      searchContactsByDateAdded(widenedStartISO, endISO, [
         customFieldFilter(fieldId, config.landingPages.test.value),
       ]),
     ]);
@@ -114,50 +133,19 @@ export async function buildDashboard(startISO, endISO) {
       ...test.map((c) => ({ contact: c, lp: "test" })),
     ];
   } else {
-    const all = await searchContactsByDateAdded(startISO, endISO);
-    contacts = all.map((c) => ({
-      contact: c,
-      lp: classify(lpValueOf(c, fieldId)),
-    }));
+    const all = await searchContactsByDateAdded(widenedStartISO, endISO);
+    contacts = all.map((c) => ({ contact: c, lp: classify(readField(c, fieldId)) }));
   }
 
-  // Map contactId -> { lp, day } for appointment attribution.
-  const cohort = new Map();
+  // contactId -> lp, for booking attribution.
+  const cohortLp = new Map();
   for (const { contact, lp } of contacts) {
-    if (!contact.id) continue;
-    cohort.set(contact.id, { lp, day: dayKey(contact.dateAdded) });
+    if (contact.id) cohortLp.set(contact.id, lp);
   }
 
-  // 3. Appointments: pull events for both calendars from window start into the
-  //    future (a window contact may book an appointment scheduled later), then
-  //    keep only bookings whose contact is in our cohort.
-  const startMs = toDate(startISO).getTime();
-  const farMs = Date.now() + 180 * 24 * 60 * 60 * 1000;
-  const excluded = config.apptExcludeStatuses.map(norm);
-  const booked = new Map(); // contactId -> Set('autobook'|'va')
-  let apptConsidered = 0;
-
-  const calJobs = [
-    { key: "autobook", id: config.calendars.autobook.id },
-    { key: "va", id: config.calendars.va.id },
-  ];
-  for (const job of calJobs) {
-    if (!job.id) continue;
-    const events = await getCalendarEvents(job.id, startMs, farMs);
-    for (const ev of events) {
-      if (ev.deleted) continue;
-      const status = norm(ev.appointmentStatus || ev.appoinmentStatus);
-      if (status && excluded.includes(status)) continue;
-      const cid = ev.contactId || ev.contact?.id;
-      if (!cid || !cohort.has(cid)) continue;
-      apptConsidered += 1;
-      if (!booked.has(cid)) booked.set(cid, new Set());
-      booked.get(cid).add(job.key);
-    }
-  }
-
-  // 4. Aggregate per registration day.
+  // Day buckets for the visible window only.
   const days = dayRange(startISO, endISO);
+  const daysSet = new Set(days);
   const daily = new Map();
   const ensure = (d) => {
     if (!daily.has(d))
@@ -165,24 +153,67 @@ export async function buildDashboard(startISO, endISO) {
     return daily.get(d);
   };
   for (const d of days) ensure(d);
+  const inWindow = (d) => d && daysSet.has(d);
 
+  // 1. New contacts (by registration day) + 2. attendance (by webinar day).
   for (const { contact, lp } of contacts) {
     if (lp === "other") continue;
-    const d = dayKey(contact.dateAdded);
-    if (!d) continue;
-    const b = ensure(d)[lp];
-    b.contacts += 1;
-    const att = attendanceOf(contact);
-    if (att === "attended") b.attended += 1;
-    else if (att === "missed") b.missed += 1;
-    const bset = booked.get(contact.id);
-    if (bset?.has("autobook")) b.autobook += 1;
-    if (bset?.has("va")) b.va += 1;
+
+    const regDay = dayKey(contact.dateAdded);
+    if (inWindow(regDay)) ensure(regDay)[lp].contacts += 1;
+
+    const webRaw = readField(contact, webinarFieldId);
+    const webDay = webRaw ? plainDateKey(webRaw) : null;
+    if (inWindow(webDay)) {
+      const att = attendanceOf(contact);
+      if (att === "attended") ensure(webDay)[lp].attended += 1;
+      else if (att === "missed") ensure(webDay)[lp].missed += 1;
+    }
   }
 
+  // 3. Bookings (by the day the appointment was booked).
+  const excluded = config.apptExcludeStatuses.map(norm);
+  const startMs = startDate.getTime();
+  const fwdMs =
+    toDate(endISO).getTime() + config.bookingForwardDays * 24 * 60 * 60 * 1000;
+  const lookupCache = new Map();
+  let apptCounted = 0;
+
+  const calJobs = [
+    { key: "autobook", id: config.calendars.autobook.id },
+    { key: "va", id: config.calendars.va.id },
+  ];
+  for (const job of calJobs) {
+    if (!job.id) continue;
+    const events = await getCalendarEvents(job.id, startMs, fwdMs);
+    for (const ev of events) {
+      if (ev.deleted) continue;
+      const status = norm(ev.appointmentStatus || ev.appoinmentStatus);
+      if (status && excluded.includes(status)) continue;
+      const bookDay = dayKey(ev.dateAdded);
+      if (!inWindow(bookDay)) continue;
+      const cid = ev.contactId || ev.contact?.id;
+      if (!cid) continue;
+
+      // Landing page of the booking's contact.
+      let lp = cohortLp.get(cid);
+      if (lp === undefined) {
+        if (!lookupCache.has(cid)) {
+          const c = await getContact(cid);
+          lookupCache.set(cid, c ? classify(readField(c, fieldId)) : "other");
+        }
+        lp = lookupCache.get(cid);
+      }
+      if (lp !== "control" && lp !== "test") continue;
+
+      ensure(bookDay)[lp][job.key] += 1;
+      apptCounted += 1;
+    }
+  }
+
+  // Assemble rows + totals.
   const sortedDays = [...daily.keys()].sort();
   const dailyRows = sortedDays.map((date) => ({ date, ...daily.get(date) }));
-
   const totals = { control: emptyBucket(), test: emptyBucket() };
   for (const row of dailyRows) {
     for (const lp of ["control", "test"]) {
@@ -196,35 +227,42 @@ export async function buildDashboard(startISO, endISO) {
       end: endISO,
       timezone: config.timezone,
       generatedAt: new Date().toISOString(),
-      cohortBasis: "registration_day",
-      fieldResolved: field
-        ? { id: field.id, fieldKey: field.fieldKey, name: field.name }
+      cohortBasis: "event_day",
+      fieldResolved: lpField
+        ? { id: lpField.id, fieldKey: lpField.fieldKey, name: lpField.name }
+        : null,
+      webinarFieldResolved: webinarField
+        ? { id: webinarField.id, fieldKey: webinarField.fieldKey, name: webinarField.name }
         : null,
       lpFieldKeyRequested: config.lpFieldKey,
+      webinarDateFieldKeyRequested: config.webinarDateFieldKey,
       landingPages: {
         control: config.landingPages.control,
         test: config.landingPages.test,
       },
-      calendars: {
-        autobook: config.calendars.autobook,
-        va: config.calendars.va,
-      },
+      calendars: { autobook: config.calendars.autobook, va: config.calendars.va },
       tags: config.tags,
       apptExcludeStatuses: config.apptExcludeStatuses,
+      lookbackDays: config.lookbackDays,
       contactsFetched: contacts.length,
-      appointmentsCounted: apptConsidered,
-      warnings: buildWarnings(field),
+      appointmentsCounted: apptCounted,
+      warnings: buildWarnings(lpField, webinarField),
     },
     totals,
     daily: dailyRows,
   };
 }
 
-function buildWarnings(field) {
+function buildWarnings(lpField, webinarField) {
   const warnings = [];
-  if (!field) {
+  if (!lpField) {
     warnings.push(
-      `Landing page custom field "${config.lpFieldKey}" could not be resolved in GHL. Contacts are classified by reading the field id from each record. Check GHL_LP_FIELD_KEY.`
+      `Landing page custom field "${config.lpFieldKey}" could not be resolved in GHL. Check GHL_LP_FIELD_KEY.`
+    );
+  }
+  if (!webinarField) {
+    warnings.push(
+      `Webinar-date field "${config.webinarDateFieldKey}" could not be resolved — attended/missed cannot be placed on the webinar day and will read 0. Check GHL_WEBINAR_DATE_FIELD_KEY.`
     );
   }
   if (!config.calendars.autobook.id)

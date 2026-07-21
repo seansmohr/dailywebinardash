@@ -64,6 +64,22 @@ export const config = {
     },
   },
 
+  // Contact custom field holding the scheduled webinar date. Attended/missed
+  // are bucketed on THIS date (the day the webinar ran), not the signup day.
+  // Verified: "Date - Webinar Time/Date" (contact.date__webinar_timedate,
+  // id MW85KtwyuHBreKUD5aRo), stored as a date at midnight UTC.
+  webinarDateFieldKey:
+    process.env.GHL_WEBINAR_DATE_FIELD_KEY || "contact.date__webinar_timedate",
+
+  // How many days before the window start to also pull contacts, so that
+  // webinar-day attendance and booking-day counts inside the window are
+  // complete even when the contact signed up well before the event.
+  lookbackDays: Number(process.env.ATTENDANCE_LOOKBACK_DAYS) || 60,
+
+  // Days after the window end to scan appointment slots, so bookings MADE in
+  // the window whose appointment is scheduled later are still captured.
+  bookingForwardDays: Number(process.env.BOOKING_FORWARD_DAYS) || 90,
+
   // Appointment statuses that do NOT count as a booking (comma-separated).
   // A cancelled appointment isn't a live booking; noshow/showed/confirmed count.
   apptExcludeStatuses: csv(process.env.APPT_EXCLUDE_STATUSES, ["cancelled"]),

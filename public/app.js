@@ -268,7 +268,7 @@ function render(data) {
     );
   }
   note.push(
-    `Everything is cohorted by the contact's registration day. Attended/missed come from tags; a booking counts a distinct contact who scheduled on that calendar (cancelled appointments excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts (attended + missed) — those whose webinar has already happened — so the two funnels compare fairly even though Daily launched more recently. Green/red chips on Daily show the percentage-point gap vs the control.`
+    `Each metric is counted on the day it happened: new contacts on their registration day, attended/missed on the WEBINAR day (from the webinar-date field + tags), and autobook/VA on the day the appointment was booked (cancelled excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts in the window (attended + missed) so the two funnels compare fairly. Green/red chips on Daily show the percentage-point gap vs the control.`
   );
   document.getElementById("footnote").textContent = note.join(" ");
 }

@@ -3,6 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, assertConfigured } from "./src/config.js";
 import { buildDashboard } from "./src/aggregate.js";
+import {
+  zonedStartOfDayISO,
+  zonedEndOfDayISO,
+  localDateStr,
+} from "./src/datewin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -54,13 +59,16 @@ app.get("/api/dashboard", async (req, res) => {
   }
 
   // Default window: last 14 days through end of today, in the dashboard tz.
+  // Day boundaries are computed IN the dashboard timezone so a picked date maps
+  // to that local calendar day, not naive UTC midnight.
+  const tz = config.timezone;
   const now = new Date();
-  const end = req.query.end
-    ? `${req.query.end}T23:59:59.999Z`
-    : endOfDayISO(now);
-  const start = req.query.start
-    ? `${req.query.start}T00:00:00.000Z`
-    : startOfDayISO(new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000));
+  const todayStr = localDateStr(now, tz);
+  const startStr =
+    req.query.start || localDateStr(new Date(now.getTime() - 13 * 86400000), tz);
+  const endStr = req.query.end || todayStr;
+  const start = zonedStartOfDayISO(startStr, tz);
+  const end = zonedEndOfDayISO(endStr, tz);
 
   const key = `${start}|${end}`;
   const force = req.query.refresh === "1";
@@ -101,10 +109,3 @@ app.listen(config.port, () => {
     );
   }
 });
-
-function startOfDayISO(d) {
-  return `${d.toISOString().slice(0, 10)}T00:00:00.000Z`;
-}
-function endOfDayISO(d) {
-  return `${d.toISOString().slice(0, 10)}T23:59:59.999Z`;
-}

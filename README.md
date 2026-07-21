@@ -30,19 +30,28 @@ These are baked in as defaults, so the **only** variable you must set is
 `GHL_API_TOKEN`. Everything else is overridable via env vars (see `.env.example`)
 if the setup changes.
 
-### Cohort model (important)
+### Event-day model (important)
 
-Every contact is cohorted by its **registration day** (`dateAdded`, in
-`DASHBOARD_TZ`). For each landing page, per day:
+Each metric is counted **on the day it actually happened**, in `DASHBOARD_TZ`:
 
-- **Contacts** — registrations that day
-- **Attended / Missed** — of those contacts, how many later earned the tag
-- **Autobook / VA** — of those contacts, how many booked on that calendar
-  (distinct contacts; `cancelled` appointments excluded)
+| Column | Counted on | Source |
+| --- | --- | --- |
+| Contacts | the **signup day** | `dateAdded` |
+| Attended / Missed | the **webinar day** | `Date - Webinar Time/Date` field + tags |
+| Autobook / VA | the **day booked** | appointment `dateAdded` (cancelled excluded) |
 
-Because it's a funnel by acquisition day, the **most recent days will show low
-attendance/bookings** — those webinars and appointments simply haven't happened
-yet. That's expected; look at days old enough for the funnel to complete.
+So filtering to a given day shows *that day's* webinar results and *that day's*
+bookings — e.g. picking this Monday shows Monday's 9am webinar attendance, even
+though those people signed up earlier in the week.
+
+Because attendance and bookings happen days after signup, the server pulls
+contacts from `ATTENDANCE_LOOKBACK_DAYS` (default 60) before the window so the
+in-window webinar/booking counts are complete. Day boundaries are computed in
+`DASHBOARD_TZ`, so a picked calendar date maps to that local day (not UTC).
+
+The three **rates** (show / autobook / VA book) on each card are window totals
+computed among resolved contacts (attended + missed) so the two funnels compare
+fairly; the Daily card shows each rate's percentage-point gap vs the control.
 
 ---
 
