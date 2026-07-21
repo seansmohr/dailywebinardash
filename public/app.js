@@ -24,7 +24,9 @@ function fmtDate(d) {
 function setDefaultRange(days) {
   const end = new Date();
   const start = new Date(end.getTime() - (days - 1) * 86400000);
-  document.getElementById("start").value = fmtDate(start);
+  // Snap the start back to its Monday so weeks are whole on the left edge.
+  const startStr = isoWeekMonday(fmtDate(start));
+  document.getElementById("start").value = startStr;
   document.getElementById("end").value = fmtDate(end);
 }
 
@@ -165,16 +167,55 @@ function baseOpts(extra = {}) {
   };
 }
 
-function renderCharts(daily, totals) {
-  const c = COLORS();
-  const labels = daily.map((d) => d.date.slice(5)); // MM-DD
+// ---- weekly rollup (Mon–Sun weeks) ----
+function isoWeekMonday(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dow = (dt.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  dt.setUTCDate(dt.getUTCDate() - dow);
+  return dt.toISOString().slice(0, 10);
+}
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+function fmtMD(dateStr) {
+  const [, m, d] = dateStr.split("-").map(Number);
+  return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1]} ${d}`;
+}
+function rollupWeekly(daily) {
+  const weeks = new Map(); // monday -> {control, test}
+  for (const row of daily) {
+    const wk = isoWeekMonday(row.date);
+    if (!weeks.has(wk))
+      weeks.set(wk, {
+        control: { contacts: 0, attended: 0, missed: 0, autobook: 0, va: 0 },
+        test: { contacts: 0, attended: 0, missed: 0, autobook: 0, va: 0 },
+      });
+    const w = weeks.get(wk);
+    for (const lp of ["control", "test"])
+      for (const k of Object.keys(w[lp])) w[lp][k] += row[lp][k];
+  }
+  return [...weeks.keys()].sort().map((monday) => ({
+    weekStart: monday,
+    weekEnd: addDays(monday, 6),
+    label: `${fmtMD(monday)}–${fmtMD(addDays(monday, 6))}`,
+    ...weeks.get(monday),
+  }));
+}
 
-  // Chart 1: daily contacts (line, 2 series)
+function renderCharts(weekly, totals) {
+  const c = COLORS();
+  const labels = weekly.map((w) => w.label);
+
+  // Chart 1: weekly contacts (line, 2 series)
   upsert("chartContacts", "line", {
     labels,
     datasets: [
-      series(LABELS.control, daily.map((d) => d.control.contacts), c.control),
-      series(LABELS.test, daily.map((d) => d.test.contacts), c.test),
+      series(LABELS.control, weekly.map((w) => w.control.contacts), c.control),
+      series(LABELS.test, weekly.map((w) => w.test.contacts), c.test),
     ],
   }, baseOpts());
 
@@ -223,11 +264,11 @@ function upsert(id, type, data, options) {
   }
 }
 
-function renderTable(daily, totals) {
+function renderTable(weekly, totals) {
   const head = `
     <thead>
       <tr>
-        <th rowspan="2">Date</th>
+        <th rowspan="2">Week</th>
         <th colspan="5" class="col-sep grp-b">${escapeHtml(LABELS.control)}</th>
         <th colspan="5" class="col-sep grp-d">${escapeHtml(LABELS.test)}</th>
       </tr>
@@ -236,16 +277,14 @@ function renderTable(daily, totals) {
         <th class="col-sep">Contacts</th><th>Att</th><th>Miss</th><th>AB</th><th>VA</th>
       </tr>
     </thead>`;
-  const row = (label, b, d, isFoot) => `
+  const row = (label, b, d) => `
     <tr>
       <td>${label}</td>
       <td class="col-sep">${b.contacts}</td><td>${b.attended}</td><td>${b.missed}</td><td>${b.autobook}</td><td>${b.va}</td>
       <td class="col-sep">${d.contacts}</td><td>${d.attended}</td><td>${d.missed}</td><td>${d.autobook}</td><td>${d.va}</td>
     </tr>`;
-  const body = daily
-    .map((r) => row(r.date, r.control, r.test))
-    .join("");
-  const foot = `<tfoot>${row("Total", totals.control, totals.test, true)}</tfoot>`;
+  const body = weekly.map((w) => row(w.label, w.control, w.test)).join("");
+  const foot = `<tfoot>${row("Total", totals.control, totals.test)}</tfoot>`;
   document.getElementById("daily").innerHTML =
     head + `<tbody>${body}</tbody>` + foot;
 }
@@ -253,12 +292,13 @@ function renderTable(daily, totals) {
 function render(data) {
   renderWarnings(data.meta);
   renderCards(data.totals);
+  const weekly = rollupWeekly(data.daily);
   try {
-    if (window.Chart) renderCharts(data.daily, data.totals);
+    if (window.Chart) renderCharts(weekly, data.totals);
   } catch (e) {
     console.error("Chart render failed:", e);
   }
-  renderTable(data.daily, data.totals);
+  renderTable(weekly, data.totals);
 
   const m = data.meta;
   const note = [];
@@ -268,7 +308,7 @@ function render(data) {
     );
   }
   note.push(
-    `Each metric is counted on the day it happened: new contacts on their registration day, attended/missed on the WEBINAR day (from the webinar-date field + tags), and autobook/VA on the day the appointment was booked (cancelled excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts in the window (attended + missed) so the two funnels compare fairly. Green/red chips on Daily show the percentage-point gap vs the control.`
+    `Grouped into Mon–Sun weeks. Within each week, contacts count on their signup day, attended/missed on the WEBINAR day (webinar-date field + tags), and autobook/VA on the day booked (cancelled excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts across the range (attended + missed) so the two funnels compare fairly. Green/red chips on Daily show the percentage-point gap vs the control.`
   );
   document.getElementById("footnote").textContent = note.join(" ");
 }
@@ -297,6 +337,6 @@ if (window.matchMedia) {
   });
 }
 
-setDefaultRange(14);
-document.querySelector('.preset[data-days="14"]').classList.add("active");
+setDefaultRange(28);
+document.querySelector('.preset[data-days="28"]').classList.add("active");
 loadConfig().then(() => load(false));

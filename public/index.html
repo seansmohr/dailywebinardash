@@ -37,9 +37,9 @@
         <div class="field">
           <label>Quick range</label>
           <div class="presets">
-            <button class="preset" data-days="7">7d</button>
-            <button class="preset" data-days="14">14d</button>
-            <button class="preset" data-days="30">30d</button>
+            <button class="preset" data-days="28">4w</button>
+            <button class="preset" data-days="56">8w</button>
+            <button class="preset" data-days="84">12w</button>
           </div>
         </div>
         <div class="field">
@@ -59,8 +59,8 @@
 
       <section class="chart-grid">
         <div class="panel full">
-          <h3>Daily new contacts by landing page</h3>
-          <p class="hint">New registrations per day (by contact registration date).</p>
+          <h3>New contacts by week</h3>
+          <p class="hint">New registrations per Mon–Sun week, by landing page.</p>
           <div class="canvas-box"><canvas id="chartContacts"></canvas></div>
         </div>
         <div class="panel">
@@ -76,10 +76,10 @@
       </section>
 
       <section class="panel full">
-        <h3>Daily breakdown</h3>
+        <h3>Weekly breakdown</h3>
         <p class="hint">
-          B = Landing Page B (control), D = Daily (test). Contacts = signups that day;
-          Att/Miss = webinar outcomes on that day's webinar; AB/VA = appointments booked that day.
+          Mon–Sun weeks. B = Landing Page B (control), D = Daily (test). Contacts = signups;
+          Att/Miss = webinar attendance that week; AB/VA = appointments booked that week.
         </p>
         <div class="table-box">
           <table class="daily" id="daily"></table>
