@@ -84,8 +84,13 @@ export const config = {
   // A cancelled appointment isn't a live booking; noshow/showed/confirmed count.
   apptExcludeStatuses: csv(process.env.APPT_EXCLUDE_STATUSES, ["cancelled"]),
 
-  // Timezone used to bucket everything into calendar days.
-  timezone: process.env.DASHBOARD_TZ || "America/New_York",
+  // Timezone used to bucket everything into calendar days. The business runs on
+  // Pacific time (webinar sessions are labeled "9am/4pm PST"), so days must be
+  // cut at Pacific midnight — otherwise a contact who registers late Sunday
+  // night PT lands on "Monday" in Eastern and inflates Monday's counts. Verified
+  // on 2026-07-20: Eastern bucketing showed 12 Daily signups, Pacific shows the
+  // correct 10 (two late-Sunday-PT registrations were wrongly pulled into Monday).
+  timezone: process.env.DASHBOARD_TZ || "America/Los_Angeles",
 
   // Optional HTTP Basic Auth to keep the dashboard private on Railway.
   auth: {
