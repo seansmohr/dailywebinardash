@@ -308,7 +308,7 @@ function render(data) {
     );
   }
   note.push(
-    `Grouped into Mon–Sun weeks. Within each week, contacts count on their signup day, attended/missed on the WEBINAR day (webinar-date field + tags), and autobook/VA on the day booked (cancelled excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts across the range (attended + missed) so the two funnels compare fairly. Green/red chips on Daily show the percentage-point gap vs the control.`
+    `Grouped into Mon–Sun weeks. Days are cut in Pacific time. Within each week, contacts count on their signup day; attended/missed land on the WEBINAR day — attended only when the "Date - Webinar Watched" field matches that day (so a repeat registrant's sticky tag from an earlier webinar isn't miscounted), otherwise missed; autobook/VA count each booker once on the day booked (reschedules deduped, cancelled excluded). Show rate, autobook rate, and VA book rate are computed among RESOLVED contacts across the range (attended + missed) so the two funnels compare fairly. Green/red chips on Daily show the percentage-point gap vs the control.`
   );
   document.getElementById("footnote").textContent = note.join(" ");
 }

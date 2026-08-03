@@ -67,13 +67,33 @@ function readField(contact, fieldId) {
   return null;
 }
 
-function attendanceOf(contact) {
+const ATTENDED_TAGS = config.tags.attended.map(norm);
+const MISSED_TAGS = config.tags.missed.map(norm);
+
+// Attendance for the webinar scheduled on `webDay` (the contact's webinar-date).
+// The attended/missed tags are STICKY across a contact's lifetime, so for a
+// repeat registrant they can reflect an EARLIER webinar. GHL's API returns tag
+// names without the timestamp they were applied, so to "go off the most recent"
+// webinar we use the "Date - Webinar Watched" field — the authoritative
+// per-event signal for the latest webinar the contact actually watched. A
+// contact counts as attended for THIS webinar only if they watched on this day;
+// otherwise, if they carry any resolution tag, they missed this one.
+export function attendanceOn(contact, webDay, watchedFieldId) {
   const tags = (contact.tags || []).map(norm);
-  const attendedSet = config.tags.attended.map(norm);
-  const missedSet = config.tags.missed.map(norm);
-  if (tags.some((t) => attendedSet.includes(t))) return "attended";
-  if (tags.some((t) => missedSet.includes(t))) return "missed";
-  return null;
+  const hasAttended = tags.some((t) => ATTENDED_TAGS.includes(t));
+  const hasMissed = tags.some((t) => MISSED_TAGS.includes(t));
+  if (!hasAttended && !hasMissed) return null; // not resolved yet
+
+  const watchedRaw = watchedFieldId ? readField(contact, watchedFieldId) : null;
+  const watchedDay = watchedRaw ? plainDateKey(watchedRaw) : null;
+
+  // Actually watched this webinar → attended.
+  if (watchedDay && watchedDay === webDay) return "attended";
+  // Attended tag but no watched-date at all: no per-event signal to contradict
+  // it, so trust the tag (rare — attendees in the data always have the field).
+  if (hasAttended && !watchedDay) return "attended";
+  // Resolved, but the most recent watch was NOT this webinar → missed this one.
+  return "missed";
 }
 
 function classify(value) {
@@ -104,12 +124,14 @@ function dayRange(startISO, endISO) {
 // ---- main ----
 
 export async function buildDashboard(startISO, endISO) {
-  const [lpField, webinarField] = await Promise.all([
+  const [lpField, webinarField, watchedField] = await Promise.all([
     resolveCustomField(config.lpFieldKey),
     resolveCustomField(config.webinarDateFieldKey),
+    resolveCustomField(config.webinarWatchedFieldKey),
   ]);
   const fieldId = lpField?.id || null;
   const webinarFieldId = webinarField?.id || null;
+  const watchedFieldId = watchedField?.id || null;
 
   // Widened fetch: pull contacts from lookbackDays before the window so that
   // webinar-day attendance and booking attribution inside the window are complete.
@@ -165,7 +187,7 @@ export async function buildDashboard(startISO, endISO) {
     const webRaw = readField(contact, webinarFieldId);
     const webDay = webRaw ? plainDateKey(webRaw) : null;
     if (inWindow(webDay)) {
-      const att = attendanceOf(contact);
+      const att = attendanceOn(contact, webDay, watchedFieldId);
       if (att === "attended") ensure(webDay)[lp].attended += 1;
       else if (att === "missed") ensure(webDay)[lp].missed += 1;
     }
@@ -186,6 +208,11 @@ export async function buildDashboard(startISO, endISO) {
   for (const job of calJobs) {
     if (!job.id) continue;
     const events = await getCalendarEvents(job.id, startMs, fwdMs);
+    // A contact who reschedules produces several appointment events for the same
+    // booking. Count each booker once per calendar, on their EARLIEST in-window
+    // booking day, so reschedules don't inflate booking totals.
+    events.sort((a, b) => toDate(a.dateAdded) - toDate(b.dateAdded));
+    const bookedContacts = new Set();
     for (const ev of events) {
       if (ev.deleted) continue;
       const status = norm(ev.appointmentStatus || ev.appoinmentStatus);
@@ -194,6 +221,7 @@ export async function buildDashboard(startISO, endISO) {
       if (!inWindow(bookDay)) continue;
       const cid = ev.contactId || ev.contact?.id;
       if (!cid) continue;
+      if (bookedContacts.has(cid)) continue; // already counted this booker
 
       // Landing page of the booking's contact.
       let lp = cohortLp.get(cid);
@@ -206,6 +234,7 @@ export async function buildDashboard(startISO, endISO) {
       }
       if (lp !== "control" && lp !== "test") continue;
 
+      bookedContacts.add(cid);
       ensure(bookDay)[lp][job.key] += 1;
       apptCounted += 1;
     }
@@ -234,6 +263,9 @@ export async function buildDashboard(startISO, endISO) {
       webinarFieldResolved: webinarField
         ? { id: webinarField.id, fieldKey: webinarField.fieldKey, name: webinarField.name }
         : null,
+      watchedFieldResolved: watchedField
+        ? { id: watchedField.id, fieldKey: watchedField.fieldKey, name: watchedField.name }
+        : null,
       lpFieldKeyRequested: config.lpFieldKey,
       webinarDateFieldKeyRequested: config.webinarDateFieldKey,
       landingPages: {
@@ -246,14 +278,14 @@ export async function buildDashboard(startISO, endISO) {
       lookbackDays: config.lookbackDays,
       contactsFetched: contacts.length,
       appointmentsCounted: apptCounted,
-      warnings: buildWarnings(lpField, webinarField),
+      warnings: buildWarnings(lpField, webinarField, watchedField),
     },
     totals,
     daily: dailyRows,
   };
 }
 
-function buildWarnings(lpField, webinarField) {
+function buildWarnings(lpField, webinarField, watchedField) {
   const warnings = [];
   if (!lpField) {
     warnings.push(
@@ -263,6 +295,11 @@ function buildWarnings(lpField, webinarField) {
   if (!webinarField) {
     warnings.push(
       `Webinar-date field "${config.webinarDateFieldKey}" could not be resolved — attended/missed cannot be placed on the webinar day and will read 0. Check GHL_WEBINAR_DATE_FIELD_KEY.`
+    );
+  }
+  if (!watchedField) {
+    warnings.push(
+      `Webinar-watched field "${config.webinarWatchedFieldKey}" could not be resolved — attendance falls back to sticky tags, which over-counts attended for repeat registrants. Check GHL_WEBINAR_WATCHED_FIELD_KEY.`
     );
   }
   if (!config.calendars.autobook.id)

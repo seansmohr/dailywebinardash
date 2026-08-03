@@ -71,6 +71,18 @@ export const config = {
   webinarDateFieldKey:
     process.env.GHL_WEBINAR_DATE_FIELD_KEY || "contact.date__webinar_timedate",
 
+  // Contact custom field holding the date the contact actually WATCHED a
+  // webinar. Attendance is validated against this: a contact counts as
+  // "attended" for a given webinar day only if their watched date equals that
+  // day. The attended/missed tags are sticky across a contact's lifetime, so a
+  // repeat registrant who attended an earlier webinar but missed their current
+  // one would otherwise be miscounted as attended.
+  // Verified: "Date - Webinar Watched" (contact.date__webinar_watched,
+  // id 4lYO2vhIh0ptjKTd6jQx), stored as a date at midnight UTC.
+  webinarWatchedFieldKey:
+    process.env.GHL_WEBINAR_WATCHED_FIELD_KEY ||
+    "contact.date__webinar_watched",
+
   // How many days before the window start to also pull contacts, so that
   // webinar-day attendance and booking-day counts inside the window are
   // complete even when the contact signed up well before the event.
